@@ -1,0 +1,8 @@
+# ESP-IDF derleme çıktıları
+esp32/build/
+esp32/sdkconfig
+esp32/sdkconfig.old
+
+# Python
+__pycache__/
+*.pyc
