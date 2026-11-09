@@ -6,10 +6,17 @@
 ESP32-S3, MPU-6050 sensöründen 50 Hz'de okuduğu ivme ve açısal hız verisini
 UART üzerinden checksum'lı metin satırları olarak Raspberry Pi'ye gönderir;
 Pi veriyi doğrulayıp kaydeder ve ESP32'ye komut gönderir.
-**Seçilen ekleme: V1 — Eğim alarmı.** Pi, ivmeden eğim açısını
-θ = atan2(ax, az) ile hesaplar, son 10 örneğin ortalamasına histerezisli
-eşik uygular (30° üstü → `$LED,1`, 25° altı → `$LED,0`) ve alarm olaylarını
-zaman damgasıyla ayrı bir dosyaya kaydeder.
+**Seçilen ekleme: V1 — Eğim alarmı.** Pi, son 10 örneğin ivme bileşenlerinin
+ortalamasından eğim açısını hesaplar, histerezisli eşik uygular
+(30° üstü → `$LED,1`, 25° altı → `$LED,0`), komutu yalnızca durum değiştiğinde
+gönderir ve alarm olaylarını zaman damgasıyla ayrı bir dosyaya kaydeder.
+Eğim, sensörün Z ekseni ile yerçekimi arasındaki açıdır:
+θ = atan2(√(ax² + ay²), az) — sensör hangi yöne eğilirse eğilsin 0° (düz) … 90° (dik) … 180° (ters).
+Yönergedeki θ = atan2(ax, az) formülü `--tek-eksen` seçeneğiyle kullanılabilir.
+
+**Sonuçlar:** 60 sn'de 3.021 örnek, 0 hatalı satır, periyot 20,0 ± 0,58 ms ·
+komut → ACK medyan 3,38 ms · dik konumda θ ≈ 90,3° · histerezis LED titremesini
+112'den 20 değişime (≈ 6 kat) indirdi. Ayrıntılar: `olcum/BENIOKU.md`, `rapor/`.
 
 ---
 
@@ -85,6 +92,7 @@ python alici.py --csv ../olcum/kayit_60s.csv
 # V1 eklemesi: eğim alarmı
 python egim_alarm.py                           # üst=30°, alt=25°, pencere=10
 python egim_alarm.py --ust 30 --alt 30 --pencere 1   # histerezissiz karşılaştırma
+python egim_alarm.py --tek-eksen                       # yönergedeki atan2(ax, az) formülü
 #   çıktılar: ../olcum/egim.csv (her örnek), ../olcum/olaylar.csv (alarm olayları)
 
 # Ölçüm: komut -> ACK süresi (30 tekrar)
