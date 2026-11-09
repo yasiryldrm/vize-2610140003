@@ -1,10 +1,14 @@
 """
 Vize eklemesi (V1): Eğim alarmı.
 
-ESP32'den gelen IMU satırlarından eğim açısını hesaplar:
-    θ = atan2(ax, az)  (derece)
-Gürültüyü azaltmak için son N örneğin ivme bileşenlerinin (ax, az) ortalamasını
-alır ve ortalama açıyı bu ortalama vektörden hesaplar. Açıların kendisinin
+ESP32'den gelen IMU satırlarından eğim açısını hesaplar. İki mod vardır:
+    her yön (varsayılan): θ = atan2(√(ax² + ay²), az)
+        Sensörün Z ekseni ile yerçekimi arasındaki açı. Düz 0°, dik 90°,
+        baş aşağı 180°; sensör hangi yöne eğilirse eğilsin doğru sonuç verir.
+    tek eksen (--tek-eksen): θ = atan2(ax, az)
+        Yönergedeki formül; yalnızca Y ekseni etrafındaki eğimi ölçer.
+Gürültüyü azaltmak için son N örneğin ivme bileşenlerinin ortalamasını alır ve
+ortalama açıyı bu ortalama vektörden hesaplar. Açıların kendisinin
 ortalaması alınmaz: ±180° sınırında (+179° ile -179°) düz ortalama anlamsız bir
 değer verir ("açı sarmalanması").
 Histerezisli eşik uygular:
@@ -17,6 +21,7 @@ Kullanım:
     python egim_alarm.py                          # /dev/serial0, ust=30, alt=25, pencere=10
     python egim_alarm.py --ust 30 --alt 25 --pencere 10
     python egim_alarm.py --ust 30 --alt 30        # histerezissiz (karşılaştırma deneyi)
+    python egim_alarm.py --tek-eksen              # yönergedeki atan2(ax, az) formülü
     python egim_alarm.py --port /dev/pts/3        # sim_esp32.py ile donanımsız deneme
 Çıkış: klavyeden q + Enter
 """
@@ -32,6 +37,13 @@ from datetime import datetime
 import serial
 
 from protokol import coz, imu_coz, kodla
+
+
+def egim(ax, ay, az, tek_eksen):
+    """Eğim açısı (derece). Her yön: Z ekseni ile yerçekimi arasındaki açı."""
+    if tek_eksen:
+        return math.degrees(math.atan2(ax, az))
+    return math.degrees(math.atan2(math.hypot(ax, ay), az))
 
 
 def klavye_dongusu(dur):
@@ -54,6 +66,8 @@ def main():
     ap.add_argument("--csv", default="../olcum/egim.csv", help="her örneğin kaydı")
     ap.add_argument("--olay", default="../olcum/olaylar.csv", help="alarm olayları günlüğü")
     ap.add_argument("--yazdir", type=int, default=25, help="her N örnekte bir ekrana yaz")
+    ap.add_argument("--tek-eksen", action="store_true",
+                    help="yönergedeki θ = atan2(ax, az) formülünü kullan (varsayılan: her yön)")
     a = ap.parse_args()
 
     if a.alt > a.ust:
@@ -73,13 +87,14 @@ def main():
     dur = threading.Event()
     threading.Thread(target=klavye_dongusu, args=(dur,), daemon=True).start()
 
-    son_ivme = deque(maxlen=a.pencere)     # kayan pencere: (ax, az); en eski örnek otomatik düşer
+    son_ivme = deque(maxlen=a.pencere)     # kayan pencere: (ax, ay, az); en eski örnek otomatik düşer
     alarm = False                          # şu anki durum (LED açık mı)
     gonderim_zamani = None                 # son komutun gönderildiği an (ACK süresi için)
     sayac = {"imu": 0, "hata": 0, "led_degisim": 0}
     t0 = time.monotonic()
 
-    print(f"{a.port} dinleniyor | üst={a.ust}° alt={a.alt}° pencere={a.pencere} | çıkış: q")
+    mod = "tek eksen: atan2(ax, az)" if a.tek_eksen else "her yön: atan2(√(ax²+ay²), az)"
+    print(f"{a.port} dinleniyor | {mod} | üst={a.ust}° alt={a.alt}° pencere={a.pencere} | çıkış: q")
 
     with open(a.csv, "w", newline="") as f_ornek, open(a.olay, "w", newline="") as f_olay:
         ornek = csv.writer(f_ornek)
@@ -113,16 +128,17 @@ def main():
             if alanlar[0] != "IMU" or len(alanlar) != 8:
                 continue
 
-            # 1) Eğim açısı: θ = atan2(ax, az), radyandan dereceye
+            # 1) Eğim açısı (derece)
             t_ms, ivme, _ = imu_coz(alanlar)
-            ax, _, az = ivme
-            aci = math.degrees(math.atan2(ax, az))
+            ax, ay, az = ivme
+            aci = egim(ax, ay, az, a.tek_eksen)
 
             # 2) Son N örneğin ortalaması (gürültü süzme). Bileşenlerin ortalaması
             #    alınıp açı ondan hesaplanır; böylece ±180° sınırında sarmalanma olmaz.
-            son_ivme.append((ax, az))
-            ort = math.degrees(math.atan2(sum(v[0] for v in son_ivme),
-                                          sum(v[1] for v in son_ivme)))
+            son_ivme.append((ax, ay, az))
+            n = len(son_ivme)
+            ort = egim(sum(v[0] for v in son_ivme) / n, sum(v[1] for v in son_ivme) / n,
+                       sum(v[2] for v in son_ivme) / n, a.tek_eksen)
 
             # 3) Histerezisli karar; komut yalnızca durum değişince gönderilir
             yeni = alarm
