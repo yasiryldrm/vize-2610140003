@@ -3,7 +3,10 @@ Vize eklemesi (V1): Eğim alarmı.
 
 ESP32'den gelen IMU satırlarından eğim açısını hesaplar:
     θ = atan2(ax, az)  (derece)
-Gürültüyü azaltmak için son N örneğin ortalamasını kullanır.
+Gürültüyü azaltmak için son N örneğin ivme bileşenlerinin (ax, az) ortalamasını
+alır ve ortalama açıyı bu ortalama vektörden hesaplar. Açıların kendisinin
+ortalaması alınmaz: ±180° sınırında (+179° ile -179°) düz ortalama anlamsız bir
+değer verir ("açı sarmalanması").
 Histerezisli eşik uygular:
     ortalama θ > UST  ->  $LED,1  (alarm başlar)
     ortalama θ < ALT  ->  $LED,0  (alarm biter)
@@ -70,7 +73,7 @@ def main():
     dur = threading.Event()
     threading.Thread(target=klavye_dongusu, args=(dur,), daemon=True).start()
 
-    son_acilar = deque(maxlen=a.pencere)   # kayan pencere: en eski örnek otomatik düşer
+    son_ivme = deque(maxlen=a.pencere)     # kayan pencere: (ax, az); en eski örnek otomatik düşer
     alarm = False                          # şu anki durum (LED açık mı)
     gonderim_zamani = None                 # son komutun gönderildiği an (ACK süresi için)
     sayac = {"imu": 0, "hata": 0, "led_degisim": 0}
@@ -115,9 +118,11 @@ def main():
             ax, _, az = ivme
             aci = math.degrees(math.atan2(ax, az))
 
-            # 2) Son N örneğin ortalaması (gürültü süzme)
-            son_acilar.append(aci)
-            ort = sum(son_acilar) / len(son_acilar)
+            # 2) Son N örneğin ortalaması (gürültü süzme). Bileşenlerin ortalaması
+            #    alınıp açı ondan hesaplanır; böylece ±180° sınırında sarmalanma olmaz.
+            son_ivme.append((ax, az))
+            ort = math.degrees(math.atan2(sum(v[0] for v in son_ivme),
+                                          sum(v[1] for v in son_ivme)))
 
             # 3) Histerezisli karar; komut yalnızca durum değişince gönderilir
             yeni = alarm
